@@ -3,17 +3,17 @@ from debate_manager import DebateManager
 
 if __name__ == "__main__":
     # 定义辩题
-    topic = "人工智能是否会取代人类工作"
+    topic = "孤独是不是人生常态？"
 
     # 定义辩手的 MBTI 配置
     mbti_config = {
-        "opp1": "ISTJ",
+        "opp1": "INTJ",
         "opp2": "ISFJ",
         "opp3": "INFJ",
         "opp4": "INTJ",
         "pro1": "ESTP",
         "pro2": "ESFP",
-        "pro3": "ENFP",
+        "pro3": "INTJ",
         "pro4": "ENTP"
     }
 

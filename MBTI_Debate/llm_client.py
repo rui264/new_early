@@ -3,6 +3,8 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import os
 from dotenv import load_dotenv
+from config.settings import get_llm_config
+from vector_db import retrieve_reactions
 
 load_dotenv()
 
@@ -11,30 +13,38 @@ class DebateLLM:
     """处理与大语言模型的交互"""
 
     def __init__(self):
-        self.llm = self._init_llm()
+        self.llm_cache = {}  # Cache LLMs by MBTI to avoid reinitialization
 
-    def _init_llm(self) -> ChatOpenAI:
-        """初始化LLM模型"""
-        return ChatOpenAI(
-            model_name="deepseek-chat",
-            temperature=0.6,
-            base_url=os.environ["DEEPSEEK_BASE_URL"],
-            api_key=os.environ["DEEPSEEK_API_KEY"],
-            max_tokens=1000  # 增加最大 token 限制，确保完整输出
+    def get_llm_for_mbti(self, mbti: str) -> ChatOpenAI:
+        if mbti in self.llm_cache:
+            return self.llm_cache[mbti]
+        
+        config = get_llm_config(mbti)
+        llm = ChatOpenAI(
+            model_name=config["model_name"],
+            temperature=config.get("temperature", 0.6),
+            base_url=config["base_url"],
+            api_key=config["api_key"],
+            max_tokens=config.get("max_tokens", 1000)
         )
+        self.llm_cache[mbti] = llm
+        return llm
 
-    def create_chain(self, prompt_template: str) -> LLMChain:
+    def create_chain(self, prompt_template: str, mbti: str, topic: str) -> LLMChain:
         """创建LLMChain"""
         prompt = PromptTemplate(
-            input_variables=["topic", "history", "speakers", "position", "speaker_id", "mbti", "mbti_style"],
+            input_variables=["topic", "history", "speakers", "position", "speaker_id", "mbti", "mbti_style", "retrieved_reactions"],
             template=prompt_template
         )
-        return LLMChain(llm=self.llm, prompt=prompt)
+        llm = self.get_llm_for_mbti(mbti)
+        return LLMChain(llm=llm, prompt=prompt)
 
-    def get_argument_chain(self) -> LLMChain:
+    def get_argument_chain(self, mbti: str, topic: str) -> LLMChain:
         """立论环节链条"""
         return self.create_chain("""
         你现在是辩论赛的{position}一辩（{speaker_id}），MBTI 类型为{mbti}，辩论风格{mbti_style}。
+
+        {retrieved_reactions}
 
         请围绕辩题「{topic}」，结合你的 MBTI 辩论风格进行立论陈词：
         {history}
@@ -45,13 +55,15 @@ class DebateLLM:
         - 字数严格控制在300-500字（必须完整输出，不得截断）
         - 语言正式，符合辩论赛风格
         - 回答中去除不必要的字符（比如'*'、'**'等），去除不必要的换行符
-        """)
+        """, mbti, topic)
 
-    def get_cross_examination_chain(self) -> LLMChain:
+    def get_cross_examination_chain(self, mbti: str, topic: str) -> LLMChain:
         """攻辩环节链条"""
         return self.create_chain("""
         你现在是辩论赛的{position}辩手（{speaker_id}），MBTI 类型为{mbti}，辩论风格{mbti_style}。
         辩题是「{topic}」，当前处于攻辩环节。
+
+        {retrieved_reactions}
 
         攻辩规则：
         - 质询方需设计尖锐的逻辑问题，抓住对方漏洞
@@ -65,13 +77,15 @@ class DebateLLM:
         - 必须体现{mbti_style}的辩论特点
         - 语言简洁有力，避免冗余
         - 回答中去除不必要的字符（比如'*'、'**'、'##'等），去除不必要的换行符
-        """)
+        """, mbti, topic)
 
-    def get_free_debate_chain(self) -> LLMChain:
+    def get_free_debate_chain(self, mbti: str, topic: str) -> LLMChain:
         """自由辩论环节链条"""
         return self.create_chain("""
         你现在是辩论赛的{position}辩手（{speaker_id}），MBTI 类型为{mbti}，辩论风格{mbti_style}。
         辩题是「{topic}」，当前处于自由辩论环节。
+
+        {retrieved_reactions}
 
         自由辩论规则：
         - 正反交替发言，每次发言需针对对方上一轮漏洞
@@ -83,13 +97,15 @@ class DebateLLM:
         {history}
 
         要求：输出纯粹的辩论内容，无需额外说明
-        """)
+        """, mbti, topic)
 
-    def get_summary_chain(self) -> LLMChain:
+    def get_summary_chain(self, mbti: str, topic: str) -> LLMChain:
         """总结陈词环节链条"""
         return self.create_chain("""
         你现在是辩论赛的{position}四辩（{speaker_id}），MBTI 类型为{mbti}，辩论风格{mbti_style}。
         辩题是「{topic}」，请结合全场历史发言：
+
+        {retrieved_reactions}
 
         {history}
 
@@ -99,4 +115,4 @@ class DebateLLM:
         - 升华价值层面论述
         - 字数控制在400-600字
         - 回答中去除不必要的字符（比如'*'、'**'等），去除不必要的换行符
-        """)
+        """, mbti, topic)

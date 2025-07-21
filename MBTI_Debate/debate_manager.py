@@ -5,6 +5,7 @@ from llm_client import DebateLLM
 from constants import STAGES
 import re
 from text_utils import extract_analysis  # 导入文本处理工具
+from vector_db import retrieve_reactions
 
 
 class DebateManager:
@@ -16,12 +17,10 @@ class DebateManager:
         self.llm = DebateLLM()
         self._init_chains()
 
+
     def _init_chains(self):
-        """初始化各环节的链条"""
-        self.argument_chain = self.llm.get_argument_chain()
-        self.cross_chain = self.llm.get_cross_examination_chain()
-        self.free_chain = self.llm.get_free_debate_chain()
-        self.summary_chain = self.llm.get_summary_chain()
+        """初始化各环节的链条 - 现在链条按需创建"""
+        pass  # Chains are created on-the-fly per MBTI
 
     def _get_topic_from_user(self) -> str:
         """从用户输入获取辩题"""
@@ -63,14 +62,17 @@ class DebateManager:
         print(f"\n=== {STAGES['ARGUMENT']}环节（轮次{self.state.current_round}-{self.state.current_round + 1}）===")
 
         # 正方一辩（pro1）立论
-        result = self.argument_chain.run(
+        chain = self.llm.get_argument_chain(self.state.mbti_map["pro1"], self.topic)
+        retrieved = retrieve_reactions(self.state.mbti_map["pro1"], self.topic)
+        result = chain.run(
             topic=self.topic,
             history="",
             speakers="正方一辩（pro1）",
             position="正方",
             speaker_id="pro1",
             mbti=self.state.mbti_map["pro1"],
-            mbti_style=self.state.get_mbti_style("pro1")
+            mbti_style=self.state.get_mbti_style("pro1"),
+            retrieved_reactions=retrieved
         )
         # 调用 extract_analysis 拆分内容
         debate_content, analysis_list = extract_analysis(result)
@@ -80,14 +82,17 @@ class DebateManager:
         self.state.next_round()
 
         # 反方一辩（opp1）立论
-        result = self.argument_chain.run(
+        chain = self.llm.get_argument_chain(self.state.mbti_map["opp1"], self.topic)
+        retrieved = retrieve_reactions(self.state.mbti_map["opp1"], self.topic)
+        result = chain.run(
             topic=self.topic,
             history=self.state.speaker_history[0]['content'],
             speakers="反方一辩（opp1）",
             position="反方",
             speaker_id="opp1",
             mbti=self.state.mbti_map["opp1"],
-            mbti_style=self.state.get_mbti_style("opp1")
+            mbti_style=self.state.get_mbti_style("opp1"),
+            retrieved_reactions=retrieved
         )
         debate_content, analysis_list = extract_analysis(result)
         self.state.add_speech("opp1", debate_content, analysis_list)
@@ -107,14 +112,17 @@ class DebateManager:
         for idx, (pro_speaker, opp_speaker) in enumerate(speakers_pair, start=1):
             # 正方向反方质询（轮次3、5）
             self.state.current_round = 3 + 2 * (idx - 1)
-            result = self.cross_chain.run(
+            chain = self.llm.get_cross_examination_chain(self.state.mbti_map[pro_speaker], self.topic)
+            retrieved = retrieve_reactions(self.state.mbti_map[pro_speaker], self.topic)
+            result = chain.run(
                 topic=self.topic,
                 history=self._get_history_summary(),
                 speakers=f"正方{pro_speaker}质询反方{opp_speaker}",
                 position="正方",
                 speaker_id=pro_speaker,
                 mbti=self.state.mbti_map[pro_speaker],
-                mbti_style=self.state.get_mbti_style(pro_speaker)
+                mbti_style=self.state.get_mbti_style(pro_speaker),
+                retrieved_reactions=retrieved
             )
             debate_content, analysis_list = extract_analysis(result)
             self.state.add_speech(pro_speaker, debate_content, analysis_list)
@@ -123,14 +131,17 @@ class DebateManager:
             self.state.next_round()
 
             # 反方回应（轮次4、6）
-            result = self.cross_chain.run(
+            chain = self.llm.get_cross_examination_chain(self.state.mbti_map[opp_speaker], self.topic)
+            retrieved = retrieve_reactions(self.state.mbti_map[opp_speaker], self.topic)
+            result = chain.run(
                 topic=self.topic,
                 history=self._get_history_summary(),
                 speakers=f"反方{opp_speaker}回应{pro_speaker}",
                 position="反方",
                 speaker_id=opp_speaker,
                 mbti=self.state.mbti_map[opp_speaker],
-                mbti_style=self.state.get_mbti_style(opp_speaker)
+                mbti_style=self.state.get_mbti_style(opp_speaker),
+                retrieved_reactions=retrieved
             )
             debate_content, analysis_list = extract_analysis(result)
             self.state.add_speech(opp_speaker, debate_content, analysis_list)
@@ -149,27 +160,36 @@ class DebateManager:
         pro_pool = self.state.pro_team  # 正方辩手
         opp_pool = self.state.opp_team  # 反方辩手
 
+        # 计算权重：E类型权重提高20%
+        def get_weights(pool):
+            return [1.2 if self.state.mbti_map[s].startswith('E') else 1.0 for s in pool]
+
         turn = 0  # 0=正方发言，1=反方发言（确保正方先开始）
 
         for _ in range(max_rounds):
             if turn % 2 == 0:
-                # 正方随机选一位辩手发言
-                speaker_id = random.choice(pro_pool)
+                # 正方加权随机选一位辩手发言
+                weights = get_weights(pro_pool)
+                speaker_id = random.choices(pro_pool, weights=weights, k=1)[0]
                 position = "正方"
             else:
-                # 反方随机选一位辩手发言
-                speaker_id = random.choice(opp_pool)
+                # 反方加权随机选一位辩手发言
+                weights = get_weights(opp_pool)
+                speaker_id = random.choices(opp_pool, weights=weights, k=1)[0]
                 position = "反方"
 
             # 生成发言
-            result = self.free_chain.run(
+            chain = self.llm.get_free_debate_chain(self.state.mbti_map[speaker_id], self.topic)
+            retrieved = retrieve_reactions(self.state.mbti_map[speaker_id], self.topic)
+            result = chain.run(
                 topic=self.topic,
                 history=self._get_history_summary(),
                 speakers=f"{position} {speaker_id}",
                 position=position,
                 speaker_id=speaker_id,
                 mbti=self.state.mbti_map[speaker_id],
-                mbti_style=self.state.get_mbti_style(speaker_id)
+                mbti_style=self.state.get_mbti_style(speaker_id),
+                retrieved_reactions=retrieved
             )
             debate_content, analysis_list = extract_analysis(result)
             self.state.add_speech(speaker_id, debate_content, analysis_list)
@@ -188,14 +208,17 @@ class DebateManager:
 
         # 反方四辩（opp4）总结
         self.state.current_round = 8
-        result = self.summary_chain.run(
+        chain = self.llm.get_summary_chain(self.state.mbti_map["opp4"], self.topic)
+        retrieved = retrieve_reactions(self.state.mbti_map["opp4"], self.topic)
+        result = chain.run(
             topic=self.topic,
             history=self._get_history_summary(),
             speakers="反方四辩（opp4）",
             position="反方",
             speaker_id="opp4",
             mbti=self.state.mbti_map["opp4"],
-            mbti_style=self.state.get_mbti_style("opp4")
+            mbti_style=self.state.get_mbti_style("opp4"),
+            retrieved_reactions=retrieved
         )
         debate_content, analysis_list = extract_analysis(result)
         self.state.add_speech("opp4", debate_content, analysis_list)
@@ -204,14 +227,17 @@ class DebateManager:
         self.state.next_round()
 
         # 正方四辩（pro4）总结
-        result = self.summary_chain.run(
+        chain = self.llm.get_summary_chain(self.state.mbti_map["pro4"], self.topic)
+        retrieved = retrieve_reactions(self.state.mbti_map["pro4"], self.topic)
+        result = chain.run(
             topic=self.topic,
             history=self._get_history_summary(),
             speakers="正方四辩（pro4）",
             position="正方",
             speaker_id="pro4",
             mbti=self.state.mbti_map["pro4"],
-            mbti_style=self.state.get_mbti_style("pro4")
+            mbti_style=self.state.get_mbti_style("pro4"),
+            retrieved_reactions=retrieved
         )
         debate_content, analysis_list = extract_analysis(result)
         self.state.add_speech("pro4", debate_content, analysis_list)

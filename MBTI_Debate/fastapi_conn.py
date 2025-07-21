@@ -14,16 +14,18 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 
-from user_database.db import SessionLocal, engine
-from user_database.crud import create_user, get_user_by_username, authenticate_user, get_user_history
-from user_database.models import Base
+# from user_database.db import SessionLocal, engine
+# from user_database.crud import create_user, get_user_by_username, authenticate_user, get_user_history
+# from user_database.models import Base
 
 from constants import MBTI_TYPES
 from debate_engine import DebateEngine
 from debate_manager import DebateManager
+from config.settings import settings
+from vector_db import vector_db  # Optional, if needed in API
 
 #建表
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="MBTI思辩交互系统",
@@ -67,26 +69,26 @@ def read_root():
     return {"欢迎使用": "MBTI思辩交互系统", "文档": "/docs"}
 
 #登录
-def get_db():#创建一个数据库会话
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-@app.post("/register")
-def uesr_register(user_name: str, password: str, db: Session = Depends(get_db)):
-    if get_user_by_username(db, user_name):
-        raise HTTPException(status_code=400, detail="用户名已存在")
-    create_user(db, user_name, password)
-    return {"msg": "注册成功"}
-
-@app.post("/login")
-def uesr_login(user_name: str, password: str, db: Session = Depends(get_db)):
-    user = authenticate_user(db, user_name, password)
-    if not user:
-        raise HTTPException(status_code=400, detail="用户名或密码错误")
-    return {"msg": "登录成功", "user_id": user.id}
+# def get_db():#创建一个数据库会话
+#     db = SessionLocal()
+#     try:
+#         yield db
+#     finally:
+#         db.close()
+#
+# @app.post("/register")
+# def uesr_register(user_name: str, password: str, db: Session = Depends(get_db)):
+#     if get_user_by_username(db, user_name):
+#         raise HTTPException(status_code=400, detail="用户名已存在")
+#     create_user(db, user_name, password)
+#     return {"msg": "注册成功"}
+#
+# @app.post("/login")
+# def uesr_login(user_name: str, password: str, db: Session = Depends(get_db)):
+#     user = authenticate_user(db, user_name, password)
+#     if not user:
+#         raise HTTPException(status_code=400, detail="用户名或密码错误")
+#     return {"msg": "登录成功", "user_id": user.id}
 
 @app.get("/mbti_types")
 def get_mbti_types():
