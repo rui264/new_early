@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>MBTI 辩论系统 - HTTP流式版本</title>
+    <style>
+        body { font-family: "微软雅黑", Arial, sans-serif; margin: 40px; }
+        #result {
+            background: #f4f4f4;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: "微软雅黑", Arial, sans-serif;
+            line-height: 1.6;
+        }
+        .typing-cursor {
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+        .loading { color: #007bff; }
+        .error { color: #dc3545; }
+        .success { color: #28a745; }
+        .status { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .mbti-select { margin: 5px 0; }
+        .mbti-select label { display: inline-block; width: 60px; }
+        .mbti-select select { margin-left: 10px; }
+        #topic { margin-bottom: 15px; }
+        .method-select { margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h2>MBTI 辩论系统 - HTTP流式版本</h2>
+    <div>
+        <label>辩题：</label>
+        <input type="text" id="topic" value="人工智能是否会取代人类工作" style="width:300px;">
+    </div>
+    <div id="mbti-selects"></div>
+
+    <button onclick="startDebate()" id="debateBtn">开始辩论</button>
+    <div id="status" class="status"></div>
+    <pre id="result"></pre>
+
+    <script>
+        const speakers = ["opp1", "opp2", "opp3", "opp4", "pro1", "pro2", "pro3", "pro4"];
+        let mbtiTypes = [];
+        let currentSpeechContent = "";
+
+        // 页面加载时获取MBTI类型
+        window.onload = function() {
+            loadMbtiTypes();
+        };
+
+        // 获取MBTI类型
+        function loadMbtiTypes() {
+            fetch("http://127.0.0.1:8000/mbti_types")
+                .then(res => {
+                    if (!res.ok) {
+                        throw new Error('网络响应错误');
+                    }
+                    return res.json();
+                })
+                .then(data => {
+                    mbtiTypes = data.mbti_types;
+                    renderMbtiSelects();
+                })
+                .catch(error => {
+                    console.error('获取MBTI类型失败:', error);
+                    document.getElementById("status").innerHTML = '<span class="error">获取MBTI类型失败: ' + error.message + '</span>';
+                    // 如果API失败，使用默认MBTI类型
+                    mbtiTypes = ["ISTJ", "ISFJ", "INFJ", "INTJ", "ISTP", "ISFP", "INFP", "INTP", "ESTP", "ESFP", "ENFP", "ENTP", "ESTJ", "ESFJ", "ENFJ", "ENTJ"];
+                    renderMbtiSelects();
+                });
+        }
+
+        // 渲染MBTI选择框
+        function renderMbtiSelects() {
+            let html = "";
+            speakers.forEach(speaker => {
+                html += `<div class="mbti-select">
+                    <label>${speaker}：</label>
+                    <select id="${speaker}">
+                        ${mbtiTypes.map(type => `<option value="${type}">${type}</option>`).join("")}
+                    </select>
+                </div>`;
+            });
+            document.getElementById("mbti-selects").innerHTML = html;
+        }
+
+        function startDebate() {
+            const topic = document.getElementById("topic").value.trim();
+            if (!topic) {
+                alert("请输入辩题！");
+                return;
+            }
+
+            const mbti_config = {};
+            let hasValidConfig = false;
+            speakers.forEach(speaker => {
+                const select = document.getElementById(speaker);
+                if (select) {
+                    mbti_config[speaker] = select.value;
+                    hasValidConfig = true;
+                }
+            });
+
+            if (!hasValidConfig) {
+                alert("请先加载MBTI类型！");
+                return;
+            }
+
+            // 显示加载状态
+            document.getElementById("debateBtn").disabled = true;
+            document.getElementById("status").innerHTML = '<span class="loading">正在连接服务器...</span>';
+            document.getElementById("result").textContent = "";
+            currentSpeechContent = "";
+
+            // HTTP流式逐字输出
+            startStreamingDebate(topic, mbti_config);
+        }
+
+        // HTTP流式逐字输出
+        function startStreamingDebate(topic, mbti_config) {
+            document.getElementById("status").innerHTML = '<span class="loading">开始HTTP流式逐字输出...</span>';
+
+            fetch("http://127.0.0.1:8000/debate", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({topic, mbti_config})
+            })
+            .then(response => {
+                if (!response.body) throw new Error("No stream");
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                function read() {
+                    reader.read().then(({done, value}) => {
+                        if (done) {
+                            document.getElementById("debateBtn").disabled = false;
+                            document.getElementById("status").innerHTML = '<span class="success">辩论生成完成！</span>';
+                            return;
+                        }
+
+                        buffer += decoder.decode(value, {stream: true});
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop(); // 保留不完整的行
+
+                        lines.forEach(line => {
+                            if (line.trim()) {
+                                try {
+                                    const data = JSON.parse(line);
+                                    handleStreamData(data);
+                                } catch (e) {
+                                    console.log("解析JSON失败:", line, e);
+                                }
+                            }
+                        });
+
+                        read();
+                    });
+                }
+                read();
+            })
+            .catch(err => {
+                document.getElementById("status").innerHTML = '<span class="error">请求失败：' + err + '</span>';
+                document.getElementById("debateBtn").disabled = false;
+            });
+        }
+
+        // 处理流式数据
+        function handleStreamData(data) {
+            console.log("收到流式数据:", data);
+
+            if (data.type === "start") {
+                document.getElementById("status").innerHTML = '<span class="loading">' + data.message + '</span>';
+            } else if (data.type === "speech_start") {
+                console.log("开始新的发言:", data.agent_id, data.stage);
+                const result = document.getElementById("result");
+                const newContent = `${data.agent_id}（${data.stage}）:\n`;
+                result.textContent += newContent;
+                currentSpeechContent = "";
+                result.scrollTop = result.scrollHeight;
+            } else if (data.type === "speech_char") {
+                console.log("收到字符:", data.char);
+                const result = document.getElementById("result");
+                result.textContent += data.char;
+                currentSpeechContent += data.char;
+                result.scrollTop = result.scrollHeight;
+            } else if (data.type === "speech_complete") {
+                console.log("发言完成:", data.agent_id);
+                const result = document.getElementById("result");
+                result.textContent += "\n\n";
+                result.scrollTop = result.scrollHeight;
+            } else if (data.type === "complete") {
+                document.getElementById("status").innerHTML = '<span class="success">' + data.message + '</span>';
+                document.getElementById("debateBtn").disabled = false;
+            } else if (data.type === "error") {
+                document.getElementById("status").innerHTML = '<span class="error">错误: ' + data.error + '</span>';
+                document.getElementById("debateBtn").disabled = false;
+            }
+        }
+
+
+
+        // 添加重新加载MBTI类型的按钮
+        function reloadMbtiTypes() {
+            document.getElementById("status").innerHTML = '<span class="loading">重新加载MBTI类型...</span>';
+            loadMbtiTypes();
+        }
+    </script>
+
+    <!-- 添加重新加载按钮 -->
+    <div style="margin-top: 10px;">
+        <button onclick="reloadMbtiTypes()" style="margin-right: 10px;">重新加载MBTI类型</button>
+        <small>如果MBTI类型加载失败，请点击此按钮重试</small>
+    </div>
+</body>
+</html>
