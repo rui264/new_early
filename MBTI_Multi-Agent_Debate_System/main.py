@@ -18,8 +18,8 @@ from MBTI_Debate.constants import MBTI_TYPES
 from MBTI_Debate.core.debate_engine import DebateEngine
 from MBTI_Debate.core.debate_manager import DebateManager
 
-# 导入MBTI建议系统
-from MBTI_Advice.advice_system import MBTIAdviceSystem
+from MBTI_Advice.agents.mbti_agent import MBTIAdviceAgent
+from MBTI_Advice.memory.conversation_memory import MBTIConversationMemory
 
 #建表
 Base.metadata.create_all(bind=engine)
@@ -134,60 +134,60 @@ async def test_api():
 # 建议功能API
 @app.post("/advice", response_model=AdviceResponse)
 async def get_advice(request: AdviceRequest):
-    """获取MBTI建议"""
+    """获取MBTI建议（支持多选mbti类型）"""
     try:
-        # 验证
-        for mbti in request.mbti_types:#命名问题吗
+        for mbti in request.mbti_types:
             if mbti not in MBTI_TYPES:
                 raise HTTPException(status_code=400, detail=f"无效的MBTI类型: {mbti}")
-        
-        # 创建建议系统实例
-        advice_system = MBTIAdviceSystem(use_vector_db=False, offline_mode=True)
-        
-        # 获取建议
-        responses = advice_system.process_user_query(
-            user_id=request.user_id,
-            query=request.question,
-            mbti_types=request.mbti_types
-        )
-        
-        # 保存建议记录
+        # 初始化对话记忆
+        memory = MBTIConversationMemory()
+        responses = {}
+        for mbti in request.mbti_types:
+            agent = MBTIAdviceAgent(mbti)
+            advice = agent.generate_advice(request.question, memory.get_history(request.user_id))
+            responses[mbti] = advice
+            memory.add_message(request.user_id, mbti, advice, is_user=False)
         advice_records.append({
             "user_id": request.user_id,
             "question": request.question,
             "mbti_types": request.mbti_types,
             "responses": responses
         })
-        
         return AdviceResponse(user_id=request.user_id, responses=responses)
-        
     except Exception as e:
         logger.error(f"建议生成失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"建议生成失败: {str(e)}")
 
 @app.post("/advice/followup")
 async def get_followup_advice(request: dict):
-    """获取追问建议"""
+    """获取追问建议（支持@MBTI类型，仅被@到的类型回复）"""
     try:
         user_id = request.get("user_id")
         followup_question = request.get("question")
         mbti_targets = request.get("mbti_targets", [])
-        
         if not user_id or not followup_question:
             raise HTTPException(status_code=400, detail="缺少用户ID或问题")
-        
-        # 创建建议系统实例
-        advice_system = MBTIAdviceSystem(use_vector_db=False, offline_mode=True)
-        
-        # 获取追问建议
-        responses = advice_system.process_followup(
-            user_id=user_id,
-            query=followup_question,
-            mbti_targets=mbti_targets
-        )
-        
+        # 解析@信息
+        at_mbti = []
+        question = followup_question
+        if followup_question.startswith("@"):  # 例如 @INTJ,ENFP 你怎么看？
+            parts = followup_question.split(" ", 1)
+            at_part = parts[0][1:]  # 去掉@，如 INTJ,ENFP
+            at_mbti = [t.strip() for t in at_part.split(",") if t.strip() in MBTI_TYPES]
+            question = parts[1] if len(parts) > 1 else ""
+        # 如果mbti_targets未指定，则用@到的类型，否则用传入的
+        targets = mbti_targets if mbti_targets else at_mbti
+        if not targets:
+            raise HTTPException(status_code=400, detail="未指定需要回复的MBTI类型")
+        # 初始化对话记忆
+        memory = MBTIConversationMemory()
+        responses = {}
+        for mbti in targets:
+            agent = MBTIAdviceAgent(mbti)
+            advice = agent.generate_advice(question, memory.get_history(user_id))
+            responses[mbti] = advice
+            memory.add_message(user_id, mbti, advice, is_user=False)
         return {"user_id": user_id, "responses": responses}
-        
     except Exception as e:
         logger.error(f"追问建议生成失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"追问建议生成失败: {str(e)}")

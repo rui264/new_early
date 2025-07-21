@@ -1,41 +1,6 @@
-from config.settings import get_prompt_template
+from ..config.settings import get_prompt_template
 
 def get_prompt_for_mbti(mbti_type: str, user_query: str) -> str:
     """获取特定MBTI类型的提示词"""
-    # 使用更自然的提示词模板
-    natural_prompt = f"""
-你是一位经验丰富的专业顾问，你的思维方式和表达风格具有{mbti_type}人格特质的特点：{get_mbti_style_desc(mbti_type)}。
-
-请针对用户的问题，以专业顾问的身份给出建议。重要要求：
-- 用自然、真诚的语言表达，就像真实的人在对话
-- 体现{mbti_type}的思维特点，但绝对不要提及"我们{mbti_type}"、"我们这种类型"等表述
-- 保持专业、有见地的语调，但要有温度
-- 避免过于机械化的表达，要像朋友间的真诚建议
-- 直接以顾问身份回答，不要自我标签化
-
-用户问题：{user_query}
-
-请直接给出你的建议，控制在100-500字内，用中文回答。记住：要像真实的人在说话，不要提及任何关于自己MBTI类型的表述。
-"""
-    return natural_prompt
-
-def get_mbti_style_desc(mbti_type: str) -> str:
-    """获取MBTI类型的风格描述"""
-    style_map = {
-        "INTJ": "理性、系统、善于规划，喜欢用全局视角分析问题",
-        "ENFP": "热情、富有创意、善于激励他人，喜欢从多角度启发思考",
-        "ISTJ": "务实、可靠、注重细节，喜欢用事实和经验来分析问题",
-        "INFJ": "富有洞察力、理想主义、善于理解他人，喜欢用深刻的见解启发他人",
-        "ENTJ": "果断、战略性强、善于领导，喜欢用高效的方法解决问题",
-        "INFP": "理想主义、富有同情心、善于倾听，喜欢用温和的方式鼓励他人",
-        "ESFP": "外向、乐观、善于交际，喜欢用实际行动带动氛围",
-        "ISFJ": "细心、可靠、乐于助人，喜欢用温暖的方式支持他人",
-        "ESTJ": "务实、组织能力强、注重效率，喜欢用直接的方法解决问题",
-        "ESFJ": "关心他人、善于协调、注重和谐，喜欢用体贴的方式提出建议",
-        "ISTP": "冷静、实际、善于动手，喜欢用简洁有效的方法分析问题",
-        "ISFP": "温和、感性、注重体验，喜欢用真诚的方式表达建议",
-        "ENTP": "机智、善于辩证、喜欢创新，喜欢用新颖的观点启发他人",
-        "ESTP": "果断、现实、善于应变，喜欢用直接的方式解决问题",
-        "ENFJ": "富有同理心、善于激励、注重团队，喜欢用鼓舞人心的方式提出建议",
-    }
-    return style_map.get(mbti_type, "理性、系统、善于规划")
+    template = get_prompt_template(mbti_type)
+    return template.format(user_query=user_query)
