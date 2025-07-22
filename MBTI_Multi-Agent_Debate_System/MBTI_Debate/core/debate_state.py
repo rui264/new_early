@@ -39,8 +39,8 @@ class DebateState:
             self.current_round = 3  # 攻辩从第3轮开始
         elif new_stage == "自由辩论":
             self.current_round = 7  # 自由辩论从第7轮开始
-        elif new_stage == "总结陈词":
-            self.current_round = 8  # 总结陈词从第8轮开始
+        #elif new_stage == "总结陈词":
+            #self.current_round = 8  # 总结陈词从第8轮开始
 
     def set_mbti(self, speaker_id: str, mbti: str):
         """设置辩手的 MBTI 类型"""
