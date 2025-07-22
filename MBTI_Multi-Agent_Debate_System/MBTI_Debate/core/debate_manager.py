@@ -336,7 +336,7 @@ class DebateManager:
         print(f"\n=== {STAGES['SUMMARY']}环节（轮次{self.state.current_round}-{self.state.current_round + 1}）===")
 
         # 反方四辩（opp4）总结
-        self.state.current_round = 8
+        #self.state.current_round = 8
         result = self.summary_chain.run(
             topic=self.topic,
             history=self._get_history_summary(),
